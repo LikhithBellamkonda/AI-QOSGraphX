@@ -1,0 +1,6 @@
+{
+  "name": "QOSGraphX Academic Dashboard",
+  "description": "An interactive dashboard integrating ThingSpeak Cloud for real-time sensor streams and advanced visualizers for QoS graph routing algorithms, discrete mathematics, and combinatorics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
