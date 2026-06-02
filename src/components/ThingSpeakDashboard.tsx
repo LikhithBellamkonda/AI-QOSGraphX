@@ -21,11 +21,16 @@ const generateDemoDataPoint = (index: number, prevVal: number, range: [number, n
 export default function ThingSpeakDashboard() {
   // Input Config state
   const [channelId, setChannelId] = useState<string>('2415124'); // Example open channel
-  const [apiKey, setApiKey] = useState<string>(''); // Optional read key
+  const [apiKey, setApiKey] = useState<string>('1EAJM2GB29JHWIHH'); // User Read API Key
   const [isDemoMode, setIsDemoMode] = useState<boolean>(true);
   const [resultsCount, setResultsCount] = useState<number>(30);
   const [refreshInterval, setRefreshInterval] = useState<number>(10); // in seconds
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
+
+  // Write support (using User Write API Key)
+  const [writeApiKey, setWriteApiKey] = useState<string>('YQGIUNIEQJFF3ORX');
+  const [isPushingLive, setIsPushingLive] = useState<boolean>(false);
+  const [pushStatus, setPushStatus] = useState<string | null>(null);
 
   // Live status
   const [isLoading, setIsLoading] = useState<boolean>(false);
@@ -40,40 +45,37 @@ export default function ThingSpeakDashboard() {
     const data: ThingSpeakFeedItem[] = [];
     let temp = 24.5;
     let hum = 55.0;
-    let soil = 68.2;
-    let light = 450;
-    let volt = 3.72;
+    let gas = 280;
+    let pir = 0;
 
     const mockChannel: ThingSpeakChannel = {
       id: 999999,
-      name: 'Academic Crop IoT Node (Demo)',
-      description: 'Educational simulation of agricultural soil, climate & power metrics.',
+      name: 'Secure Environment IoT Node (Demo)',
+      description: 'Educational simulation of climate, gas sensor levels & PIR motion metrics.',
       created_at: new Date(Date.now() - 3600000).toISOString(),
       updated_at: new Date().toISOString(),
       last_entry_id: resultsCount,
       field1: 'Temperature (°C)',
       field2: 'Humidity (%)',
-      field3: 'Soil Moisture (%)',
-      field4: 'Light Intensity (Lux)',
-      field5: 'Solar Voltage (V)',
+      field3: 'MQ2 Gas Level (ppm)',
+      field4: 'PIR Motion Sensor (Binary)',
     };
     
     for (let i = resultsCount; i >= 1; i--) {
       temp = generateDemoDataPoint(i, temp, [15, 38]);
       hum = generateDemoDataPoint(i, hum, [30, 95]);
-      soil = generateDemoDataPoint(i, soil, [10, 100]);
-      light = generateDemoDataPoint(i, light, [100, 1000]);
-      volt = generateDemoDataPoint(i, volt, [3.2, 4.2]);
+      gas = generateDemoDataPoint(i, gas, [100, 900]);
+      pir = Math.random() > 0.8 ? 1 : 0;
       
       data.push({
         created_at: new Date(Date.now() - i * 60000).toISOString(),
         entry_id: resultsCount - i + 1,
         field1: temp,
         field2: hum,
-        field3: soil,
-        field4: light,
-        field5: volt,
+        field3: parseFloat(gas.toFixed(1)),
+        field4: pir,
       });
+      gas = generateDemoDataPoint(i, gas, [100, 900]);
     }
 
     setChannelInfo(mockChannel);
@@ -117,6 +119,31 @@ export default function ThingSpeakDashboard() {
     }
   }, [channelId, apiKey, isDemoMode, resultsCount, selectedField]);
 
+  // Push simulated data to User's ThingSpeak cloud dynamically
+  const pushToThingSpeak = useCallback(async (temp: number, hum: number, gas: number, pir: number) => {
+    if (!writeApiKey.trim()) {
+      setPushStatus('No Write API Key provided.');
+      return;
+    }
+    try {
+      setPushStatus('Pushing metrics...');
+      const url = `https://api.thingspeak.com/update?api_key=${writeApiKey}&field1=${temp}&field2=${hum}&field3=${gas}&field4=${pir}`;
+      const response = await fetch(url);
+      if (response.ok) {
+        const text = await response.text();
+        if (text === '0') {
+          setPushStatus('Failed: Rate limit (wait 15s between writes).');
+        } else {
+          setPushStatus(`Payload uploaded! Channel Entry ID: ${text}`);
+        }
+      } else {
+        setPushStatus(`Upload failed: status ${response.status}`);
+      }
+    } catch (err: any) {
+      setPushStatus(`Upload error: ${err.message || err}`);
+    }
+  }, [writeApiKey]);
+
   // Handle stream tick for live demo simulation
   useEffect(() => {
     if (isDemoMode) {
@@ -137,25 +164,25 @@ export default function ThingSpeakDashboard() {
           const lastIndex = prev[prev.length - 1].entry_id;
           const lastTemp = parseFloat(String(prev[prev.length - 1].field1 || 25));
           const lastHum = parseFloat(String(prev[prev.length - 1].field2 || 60));
-          const lastSoil = parseFloat(String(prev[prev.length - 1].field3 || 65));
-          const lastLight = parseFloat(String(prev[prev.length - 1].field4 || 400));
-          const lastVolt = parseFloat(String(prev[prev.length - 1].field5 || 3.7));
+          const lastGas = parseFloat(String(prev[prev.length - 1].field3 || 280));
 
           const newTemp = generateDemoDataPoint(0, lastTemp, [15, 38]);
           const newHum = generateDemoDataPoint(0, lastHum, [30, 95]);
-          const newSoil = generateDemoDataPoint(0, lastSoil, [10, 100]);
-          const newLight = generateDemoDataPoint(0, lastLight, [100, 1000]);
-          const newVolt = generateDemoDataPoint(0, lastVolt, [3.2, 4.2]);
+          const newGas = generateDemoDataPoint(0, lastGas, [100, 900]);
+          const newPir = Math.random() > 0.8 ? 1 : 0;
 
           const nextFeed: ThingSpeakFeedItem = {
             created_at: new Date().toISOString(),
             entry_id: lastIndex + 1,
             field1: newTemp,
             field2: newHum,
-            field3: newSoil,
-            field4: newLight,
-            field5: newVolt,
+            field3: parseFloat(newGas.toFixed(1)),
+            field4: newPir,
           };
+          
+          if (isPushingLive) {
+            pushToThingSpeak(newTemp, newHum, parseFloat(newGas.toFixed(1)), newPir);
+          }
           
           return [...prev.slice(1), nextFeed];
         });
@@ -165,7 +192,7 @@ export default function ThingSpeakDashboard() {
     }, refreshInterval * 1000);
 
     return () => clearInterval(interval);
-  }, [isPlaying, isDemoMode, refreshInterval, fetchThingSpeakData]);
+  }, [isPlaying, isDemoMode, refreshInterval, fetchThingSpeakData, isPushingLive, pushToThingSpeak]);
 
   // Aggregate statistics
   const statistics = useMemo(() => {
@@ -289,7 +316,7 @@ export default function ThingSpeakDashboard() {
                 <div className="flex space-x-2">
                   <Wifi className="h-4 w-4 text-blue-400 shrink-0 mt-0.5" />
                   <p className="text-[11px] leading-relaxed text-blue-300 font-medium">
-                    Simulating fully dynamic local crop-sensor metrics. Use this mode to evaluate visual performance without having a live IoT device running.
+                    Simulating fully dynamic local environmental safety sensor metrics. Use this mode to evaluate visual performance without having a live IoT device running.
                   </p>
                 </div>
               </div>
@@ -365,6 +392,80 @@ export default function ThingSpeakDashboard() {
                 </button>
               )}
             </div>
+          </div>
+        </div>
+
+        {/* Live ThingSpeak cloud transmitter control board */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+          <div className="flex items-center space-x-2 text-emerald-400 font-semibold pb-2 border-b border-slate-800">
+            <Activity className="h-5 w-5 text-emerald-400" />
+            <span className="font-sans">Simulated Cloud Writer</span>
+          </div>
+
+          <div className="space-y-3">
+            <div>
+              <label htmlFor="thingspeak-write-key" className="block text-xs font-semibold text-slate-400 uppercase tracking-wide mb-1">
+                Write API Key (Private)
+              </label>
+              <input 
+                id="thingspeak-write-key"
+                type="password" 
+                value={writeApiKey}
+                onChange={(e) => setWriteApiKey(e.target.value)}
+                placeholder="e.g. YQGIUNIEQJFF3ORX"
+                className="w-full text-sm bg-slate-950 border border-slate-850 rounded-xl px-3.5 py-2.5 text-slate-100 placeholder-slate-700 focus:outline-hidden focus:border-blue-500 focus:ring-2 focus:ring-blue-950/40 transition-all font-mono"
+              />
+            </div>
+
+            <div className="flex items-center justify-between p-2.5 bg-slate-950 border border-slate-850 rounded-xl">
+              <div className="text-xs">
+                <span className="block font-semibold text-slate-300">Auto-Sync to Cloud</span>
+                <span className="text-[10px] text-slate-500">Post simulated ticks live</span>
+              </div>
+              <button
+                id="btn-auto-sync-toggle"
+                onClick={() => setIsPushingLive(!isPushingLive)}
+                className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 ${
+                  isPushingLive ? 'bg-emerald-500' : 'bg-slate-800'
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                    isPushingLive ? 'translate-x-4' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+
+            <div className="space-y-2 pt-1">
+              <button
+                id="btn-single-cloud-manual-push"
+                onClick={() => {
+                  const latestItem = feedData[feedData.length - 1];
+                  const temp = latestItem ? parseFloat(String(latestItem.field1)) : 24.5;
+                  const hum = latestItem ? parseFloat(String(latestItem.field2)) : 55.0;
+                  const gas = latestItem ? parseFloat(String(latestItem.field3)) : 280.0;
+                  const pir = latestItem ? parseFloat(String(latestItem.field4)) : 0;
+                  pushToThingSpeak(temp, hum, gas, pir);
+                }}
+                className="w-full bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 py-1.5 px-3 rounded-lg flex items-center justify-center space-x-1.5 text-xs font-semibold cursor-pointer transition-all"
+              >
+                <span>Trigger Single Cloud Post</span>
+              </button>
+
+              {pushStatus && (
+                <div className="p-2 bg-slate-950 border border-slate-850 rounded-lg text-[10px] font-mono text-center">
+                  <span className="text-slate-500">Status: </span>
+                  <span className={pushStatus.includes('uploaded') ? 'text-emerald-400 font-semibold' : 'text-amber-400'}>
+                    {pushStatus}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            <p className="text-[10px] text-slate-500 leading-normal">
+              Field mapping: Temp (F1), Hum (F2), Gas (F3), PIR Motion (F4).
+            </p>
           </div>
         </div>
 
